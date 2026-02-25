@@ -1,219 +1,125 @@
-/**
- * CampusShield – Content Script
- * Responsibilities:
- *  - Extract email content from page
- *  - Request scan via background service worker
- *  - Inject floating panel (iframe)
- *  - Highlight risky text + suspicious links
- */
+console.log("✅ CampusShield content script running:", location.href);
 
-console.log("✅ CampusShield content script running on:", window.location.href);
+/* ---------------- CONFIG ---------------- */
 
-/* ============================================================
-   CONFIG
-============================================================ */
-
-const HIGHLIGHT_PHRASES = [
+const PHRASES = [
   "urgent",
   "act now",
   "immediately",
   "verify your",
   "confirm your",
-  "account suspended",
-  "login",
-  "reset password",
+  "suspended",
   "click the link"
 ];
 
-/* ============================================================
-   STYLE INJECTION
-============================================================ */
+/* ---------------- STYLES ---------------- */
 
-function injectHighlightStyles() {
-  if (document.getElementById("campusshield-styles")) return;
+(function injectStyles() {
+  if (document.getElementById("cs-style")) return;
 
   const style = document.createElement("style");
-  style.id = "campusshield-styles";
+  style.id = "cs-style";
   style.textContent = `
-    .cs-highlight-text {
-      background: linear-gradient(
-        90deg,
-        rgba(255, 230, 150, 0.4),
-        rgba(255, 230, 150, 0.15)
-      );
+    .cs-highlight {
+      background: rgba(255, 225, 130, 0.45);
+      border-radius: 4px;
       padding: 2px 4px;
-      border-radius: 4px;
     }
-
-    .cs-highlight-link {
-      outline: 3px solid rgba(239, 68, 68, 0.6);
+    .cs-link {
+      outline: 3px solid rgba(239, 68, 68, 0.7);
       border-radius: 4px;
-      padding: 2px;
     }
   `;
   document.head.appendChild(style);
-}
+})();
 
-/* ============================================================
-   HIGHLIGHTING
-============================================================ */
+/* ---------------- EXTRACT EMAIL ---------------- */
 
-function clearHighlights() {
-  document.querySelectorAll(".cs-highlight-text").forEach(el => {
-    el.replaceWith(el.textContent);
-  });
-
-  document.querySelectorAll(".cs-highlight-link").forEach(el => {
-    el.classList.remove("cs-highlight-link");
-  });
-}
-
-function highlightRiskyText(container) {
-  if (!container) return;
-
-  let html = container.innerHTML;
-
-  HIGHLIGHT_PHRASES.forEach(phrase => {
-    const regex = new RegExp(`(${phrase})`, "gi");
-    html = html.replace(regex, `<span class="cs-highlight-text">$1</span>`);
-  });
-
-  container.innerHTML = html;
-}
-
-function highlightSuspiciousLinks(links = []) {
-  links.forEach(link => {
-    document.querySelectorAll(`a[href*="${link}"]`).forEach(a => {
-      a.classList.add("cs-highlight-link");
-      a.title = "⚠️ Marked suspicious by CampusShield";
-    });
-  });
-}
-
-/* ============================================================
-   EMAIL EXTRACTION (mock page compatible)
-============================================================ */
-
-function extractEmailData() {
+function extractEmail() {
   return {
     sender: document.querySelector(".sender")?.innerText || "unknown",
     subject: document.querySelector(".subject")?.innerText || "",
-    body: document.querySelector(".body")?.innerText || "",
-    links: Array.from(document.querySelectorAll("a")).map(a => a.href)
+    body: document.querySelector(".body")?.innerText || document.body.innerText,
+    links: [...document.querySelectorAll("a")].map(a => a.href)
   };
 }
 
-/* ============================================================
-   PANEL (IFRAME) INJECTION
-============================================================ */
+/* ---------------- PANEL ---------------- */
 
 function injectPanel() {
-  let iframe = document.getElementById("campusshield-panel");
+  if (document.getElementById("campusshield-panel")) return;
 
-  if (iframe) return iframe;
-
-  iframe = document.createElement("iframe");
+  const iframe = document.createElement("iframe");
   iframe.id = "campusshield-panel";
   iframe.src = chrome.runtime.getURL("ui/panel.html");
 
   Object.assign(iframe.style, {
     position: "fixed",
-    top: "80px",
-    right: "24px",
-    width: "340px",
+    top: "90px",
+    right: "20px",
+    width: "360px",
     height: "420px",
     border: "none",
     borderRadius: "12px",
     zIndex: "2147483647",
-    boxShadow: "0 20px 50px rgba(0,0,0,0.45)"
+    boxShadow: "0 20px 60px rgba(0,0,0,0.4)"
   });
 
   document.body.appendChild(iframe);
+}
 
-  // Close handler from panel
-  window.addEventListener("message", (event) => {
-    if (event?.data?.type === "CS_CLOSE_PANEL") {
-      iframe.remove();
-    }
+/* ---------------- HIGHLIGHT ---------------- */
+
+function highlight(body, links) {
+  let html = body.innerHTML;
+  PHRASES.forEach(p => {
+    const r = new RegExp(`(${p})`, "gi");
+    html = html.replace(r, `<span class="cs-highlight">$1</span>`);
   });
+  body.innerHTML = html;
 
-  return iframe;
+  links.forEach(l => {
+    document.querySelectorAll(`a[href*="${l}"]`)
+      .forEach(a => a.classList.add("cs-link"));
+  });
 }
 
-function renderPanel(result) {
-  const iframe = injectPanel();
+/* ---------------- SCAN ---------------- */
 
-  const sendResult = () => {
-    iframe.contentWindow.postMessage(
-      {
-        type: "CS_SCAN_RESULT",
-        payload: result
-      },
-      "*"
-    );
-  };
+function scanEmail() {
+  injectPanel();
 
-  if (iframe.contentWindow) {
-    sendResult();
-  } else {
-    iframe.addEventListener("load", sendResult, { once: true });
-  }
-}
-
-/* ============================================================
-   SCAN FLOW
-============================================================ */
-
-function requestScan() {
-  clearHighlights();
-
-  const payload = extractEmailData();
+  const payload = extractEmail();
 
   chrome.runtime.sendMessage(
     { type: "scanEmail", payload },
-    (response) => {
-      if (!response?.ok) {
-        console.error("❌ Scan failed:", response?.error);
-        renderPanel({
-          risk_level: "Unknown",
-          confidence_score: 0,
-          explanations: ["Backend not reachable"],
-          suspicious_links: []
-        });
-        return;
-      }
+    (res) => {
+      const iframe = document.getElementById("campusshield-panel");
 
-      const result = response.result;
+      const safeResult = res?.ok
+        ? res.result
+        : {
+            risk_level: "Unknown",
+            confidence_score: 0,
+            explanations: ["Backend not reachable"],
+            suspicious_links: []
+          };
 
-      const bodyNode = document.querySelector(".body") || document.body;
-      highlightRiskyText(bodyNode);
-      highlightSuspiciousLinks(result.suspicious_links || []);
+      iframe.contentWindow.postMessage(
+        { type: "CS_SCAN_RESULT", payload: safeResult },
+        "*"
+      );
 
-      renderPanel(result);
+      const body = document.querySelector(".body") || document.body;
+      highlight(body, safeResult.suspicious_links || []);
     }
   );
 }
 
-/* ============================================================
-   MESSAGE LISTENERS (popup / background)
-============================================================ */
+/* ---------------- LISTENER ---------------- */
 
-chrome.runtime.onMessage.addListener((msg) => {
-  if (msg?.type === "REQUEST_SCAN") {
-    requestScan();
-  }
+chrome.runtime.onMessage.addListener(msg => {
+  if (msg?.type === "REQUEST_SCAN") scanEmail();
 });
-
-/* ============================================================
-   INIT
-============================================================ */
-
-injectHighlightStyles();
-
-// For demo visibility on mock page
-const demoBody = document.querySelector(".body");
-if (demoBody) {
-  highlightRiskyText(demoBody);
-}
 
 console.log("✅ CampusShield content script initialized");
