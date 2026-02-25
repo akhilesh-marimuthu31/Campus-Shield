@@ -1,11 +1,16 @@
 """
+backend/detector.py
+
 Phishing detection module with rule-based analysis.
 Privacy-first: no raw email content is stored or logged.
+
+Returns a DetectionResult dataclass which can be converted to JSON by the API layer.
 """
 
 import re
-from typing import List, Dict, Tuple, Optional
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
+from typing import List, Tuple
+from urllib.parse import urlparse
 
 
 @dataclass
@@ -27,7 +32,12 @@ class PIIMasker:
         match = re.match(r'([^@]+)@(.+)', email)
         if match:
             local, domain = match.groups()
-            masked_local = local[0] + '*' * max(1, len(local) - 2) + (local[-1] if len(local) > 1 else '')
+            if len(local) == 1:
+                masked_local = local[0]
+            elif len(local) == 2:
+                masked_local = local[0] + '*'
+            else:
+                masked_local = local[0] + '*' * (len(local) - 2) + local[-1]
             return f"{masked_local}@{domain}"
         return "***@***"
 
@@ -43,10 +53,10 @@ class PIIMasker:
     def mask_sensitive_data(text: str) -> str:
         """Mask emails and phone numbers in text."""
         # Mask email addresses
-        text = re.sub(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+', lambda m: PIIMasker.mask_email(m.group()), text)
-        # Mask phone numbers
-        text = re.sub(r'\b(\+?1[-.\s]?)?\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4}\b', 
-                     lambda m: PIIMasker.mask_phone(m.group()), text)
+        text = re.sub(r'([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+)', lambda m: PIIMasker.mask_email(m.group()), text)
+        # Mask phone numbers (US-centric pattern but OK for demo)
+        text = re.sub(r'\b(\+?1[-.\s]?)?\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4}\b',
+                      lambda m: PIIMasker.mask_phone(m.group()), text)
         return text
 
 
@@ -57,193 +67,229 @@ class PhishingDetector:
         """Initialize detection rules and patterns."""
         self.rules = self._init_rules()
 
-    def _init_rules(self) -> List[Dict]:
-        """
-        Define all detection rules with scoring weights.
-        Each rule contains: pattern, weight, rule_id, explanation.
-        """
+    def _init_rules(self):
+        """Return list of rule definitions with id, patterns, weight and explanation."""
         return [
-            # Urgency indicators
             {
                 'id': 'urgency_pressure',
-                'patterns': [r'\burge?nt(?!ly|\sasync)', r'\bact\snow\b', r'\bimmediate(?:ly)?\b', r'\bASAP\b'],
+                'patterns': [r'\burgent\b', r'\bact now\b', r'\bimmediately\b', r'\bASAP\b', r'\bnow or you\b'],
                 'weight': 0.15,
-                'explanation': 'Email uses high-pressure urgency language.',
+                'explanation': 'Email uses high-pressure urgency language.'
             },
-            # Account verification requests
             {
                 'id': 'verify_account',
-                'patterns': [r'\bverif(?:y|ication)\s+(?:your\s+)?(?:account|identity|info)', 
-                           r'\bconfirm\s+(?:your\s+)?(?:account|identity|info)',
-                           r'\bre-?verify\b'],
+                'patterns': [r'\bverify (?:your )?(?:account|identity|info)\b', r'\bconfirm (?:your )?(?:account|identity|info)\b'],
                 'weight': 0.20,
-                'explanation': 'Email requests verification of account credentials.',
+                'explanation': 'Email requests verification of account credentials.'
             },
-            # Account suspension threats
             {
                 'id': 'account_suspension',
-                'patterns': [r'\bsuspend(?:ed)?\b', r'\blocked?\b', r'\brestricted?\b'],
+                'patterns': [r'\bsuspend(?:ed|ion)?\b', r'\blocked\b', r'\brestricted\b', r'\bwill be closed\b'],
                 'weight': 0.18,
-                'explanation': 'Email threatens account suspension or lockout.',
+                'explanation': 'Email threatens account suspension or lockout.'
             },
-            # Password/login requests
             {
                 'id': 'password_request',
-                'patterns': [r'\b(?:reset|change|update|confirm)\s+(?:your\s+)?password\b',
-                           r'\blogin\s+(?:again|now)\b', r'\bre-?authenticate\b'],
+                'patterns': [r'\breset (?:your )?password\b', r'\bupdate (?:your )?password\b', r'\bprovide (?:your )?password\b'],
                 'weight': 0.20,
-                'explanation': 'Email requests password or login information.',
+                'explanation': 'Email requests password or login information.'
             },
-            # Fake urgency with links
             {
                 'id': 'click_link_urgency',
-                'patterns': [r'(?:click|tap|open|visit).*(?:link|here|button)'],
+                'patterns': [r'(?:click|tap|open|visit)\s+(?:the\s+)?(?:link|here|button)\b', r'\bclick here\b'],
                 'weight': 0.12,
-                'explanation': 'Email urges clicking a link or button.',
+                'explanation': 'Email urges clicking a link or button.'
             },
-            # Payment/billing claims
             {
                 'id': 'payment_claim',
-                'patterns': [r'\b(?:billing|payment|invoice|charge|subscription)\s+(?:issue|problem|due|failed)',
-                           r'\bupdate\s+(?:billing|payment)\s+(?:info|method)',
-                           r'\b(?:paypal|venmo|stripe|credit\s+card)\b'],
+                'patterns': [r'\bbilling\b', r'\binvoice\b', r'\bpayment (?:failed|due)\b', r'\bupdate (?:billing|payment)\b'],
                 'weight': 0.13,
-                'explanation': 'Email claims billing or payment issues.',
+                'explanation': 'Email claims billing or payment issues.'
             },
-            # Lottery/prize claims
             {
                 'id': 'prize_claim',
-                'patterns': [r'\b(?:congratulations|win|won|claim|prize|reward)\b'],
+                'patterns': [r'\bcongratulations\b', r'\bclaim your prize\b', r'\byou won\b'],
                 'weight': 0.10,
-                'explanation': 'Email claims prize or reward.',
+                'explanation': 'Email claims a prize or reward.'
             },
-            # Misspellings of known brands
             {
                 'id': 'misspelled_brand',
-                'patterns': [r'\b(?:gmai|gmial|gogle|amazn|micorsoft)\b'],
+                'patterns': [r'\bgmai\b', r'\bgmial\b', r'\bgogle\b', r'\bamazn\b', r'\bmicorsoft\b'],
                 'weight': 0.08,
-                'explanation': 'Email contains misspelled brand names.',
+                'explanation': 'Email contains misspelled brand names.'
             },
         ]
 
     def detect_urls(self, text: str) -> List[str]:
         """Extract URLs from text."""
-        url_pattern = r'https?://[^\s)>\'"]+|www\.[^\s)>\'"]+\.[a-z]+'
-        return re.findall(url_pattern, text, re.IGNORECASE)
+        # capture http/https and www links
+        url_pattern = r'https?://[^\s)>\'"]+|www\.[^\s)>\'"]+\.[a-z]{2,}'
+        return re.findall(url_pattern, text, flags=re.IGNORECASE)
+
+    def _extract_domain(self, url: str) -> str:
+        """Return hostname (domain) part of a URL, or empty string on parse failure."""
+        try:
+            parsed = urlparse(url if url.startswith('http') else f'http://{url}')
+            return parsed.hostname or ''
+        except Exception:
+            return ''
 
     def analyze_urls(self, urls: List[str], sender: str) -> Tuple[List[str], float]:
         """
         Analyze URLs for suspicious characteristics.
-        Returns: (suspicious_urls, score_contribution)
+        Returns a tuple: (list_of_suspicious_urls, score_contribution)
         """
         suspicious = []
-        suspicious_score = 0.0
+        score = 0.0
+
+        # Known shorteners commonly abused
+        shorteners = {'bit.ly', 't.co', 'tinyurl.com', 'goo.gl', 'ow.ly', 'is.gd', 'buff.ly'}
+
+        # suspicious TLDs
+        suspicious_tlds = {'.tk', '.ml', '.ga', '.cf', '.gq'}
+
+        # sender domain for simple mismatch check
+        sender_domain = ''
+        try:
+            sender_domain = sender.split('@', 1)[1].lower() if '@' in sender else ''
+        except Exception:
+            sender_domain = ''
 
         for url in urls:
-            url_lower = url.lower()
-            
-            # Check for IP addresses instead of domain names
-            if re.search(r'https?://\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', url):
-                suspicious.append(url)
-                suspicious_score += 0.15
+            u = url.strip()
+            u_lower = u.lower()
+
+            # IP-based URL
+            if re.search(r'https?://\d{1,3}(?:\.\d{1,3}){3}', u_lower):
+                suspicious.append(u)
+                score += 0.18
                 continue
-            
-            # Check for very long URLs (often used for obfuscation)
-            if len(url) > 100:
-                suspicious.append(url)
-                suspicious_score += 0.10
-                continue
-            
-            # Check for multiple redirects (many slashes)
-            if url.count('/') > 5:
-                suspicious.append(url)
-                suspicious_score += 0.10
-                continue
-            
-            # Check for suspicious TLDs
-            suspicious_tlds = ['.tk', '.ml', '.ga', '.cf']
-            if any(url_lower.endswith(tld) for tld in suspicious_tlds):
-                suspicious.append(url)
-                suspicious_score += 0.12
-                continue
-        
-        return suspicious, min(suspicious_score, 0.30)  # Cap at 0.30
+
+            # Missing https (non-secure)
+            if not u_lower.startswith('https://'):
+                suspicious.append(u)
+                score += 0.12
+                # keep checking other signals (don't continue)
+
+            # Shorteners
+            domain = self._extract_domain(u_lower)
+            if domain and domain in shorteners:
+                if u not in suspicious:
+                    suspicious.append(u)
+                score += 0.15
+
+            # Long/obfuscated URL
+            if len(u) > 100:
+                if u not in suspicious:
+                    suspicious.append(u)
+                score += 0.10
+
+            # Many path segments (possible redirect chain)
+            if u.count('/') > 5:
+                if u not in suspicious:
+                    suspicious.append(u)
+                score += 0.08
+
+            # Suspicious TLD
+            if any(u_lower.endswith(tld) for tld in suspicious_tlds):
+                if u not in suspicious:
+                    suspicious.append(u)
+                score += 0.12
+
+            # Keyword-based heuristics inside URL
+            if any(k in u_lower for k in ('login', 'signin', 'verify', 'account', 'secure')):
+                if u not in suspicious:
+                    suspicious.append(u)
+                score += 0.10
+
+            # Simple sender vs link domain mismatch (low weight; many legit emails differ)
+            link_domain = domain
+            if sender_domain and link_domain and sender_domain not in link_domain:
+                # don't mark solely on domain mismatch, but add small suspicion
+                score += 0.05
+
+        # cap URL score reasonably so it doesn't dominate rules
+        return list(dict.fromkeys(suspicious)), min(score, 0.40)
 
     def check_rules(self, text: str) -> Tuple[List[str], float]:
         """
         Check text against all detection rules.
-        Returns: (matched_rule_ids, score_contribution)
+        Returns: (matched_rule_ids, total_score_contribution)
         """
         text_lower = text.lower()
-        matched_rules = []
-        total_score = 0.0
+        matched = []
+        total = 0.0
 
         for rule in self.rules:
             for pattern in rule['patterns']:
-                if re.search(pattern, text_lower, re.IGNORECASE):
-                    matched_rules.append(rule['id'])
-                    total_score += rule['weight']
-                    break  # Only count each rule once
+                if re.search(pattern, text_lower, flags=re.IGNORECASE):
+                    matched.append(rule['id'])
+                    total += rule['weight']
+                    break  # count each rule at most once
 
-        return matched_rules, min(total_score, 0.99)  # Cap to avoid exceeding 1.0
+        return list(dict.fromkeys(matched)), min(total, 0.99)
 
     def get_explanations(self, matched_rule_ids: List[str]) -> List[str]:
         """Get human-readable explanations for matched rules."""
         explanations = []
         rule_map = {rule['id']: rule['explanation'] for rule in self.rules}
-        
-        for rule_id in matched_rule_ids:
-            if rule_id in rule_map:
-                explanations.append(rule_map[rule_id])
-        
+        for rid in matched_rule_ids:
+            if rid in rule_map:
+                explanations.append(rule_map[rid])
         return explanations
 
     def analyze(self, sender: str, subject: str, body: str) -> DetectionResult:
         """
         Perform comprehensive phishing analysis.
-        
+
         Args:
             sender: Email sender address
             subject: Email subject line
             body: Email body content
-        
+
         Returns:
             DetectionResult with risk assessment
         """
-        # Combine text for analysis
-        full_text = f"{subject} {body}"
+        # Combine text for analysis; mask PII in returned explanations if needed (we avoid storing raw text)
+        full_text = f"{subject or ''} {body or ''}"
 
-        # Extract URLs
+        # Extract URLs from subject+body
         urls = self.detect_urls(full_text)
 
-        # Check rules
+        # Rule-based matches and score
         matched_rules, rule_score = self.check_rules(full_text)
 
-        # Analyze URLs
-        suspicious_urls, url_score = self.analyze_urls(urls, sender)
+        # URL analysis and URL-based score
+        suspicious_urls, url_score = self.analyze_urls(urls, sender or "")
 
-        # Calculate confidence score
-        confidence_score = min(rule_score + url_score, 1.0)
+        # Compose base confidence from rules + urls
+        confidence = min(rule_score + url_score, 1.0)
 
-        # Determine risk level
-        if confidence_score >= 0.70:
-            risk_level = "High"
-        elif confidence_score >= 0.40:
-            risk_level = "Medium"
+        # Decide risk level by thresholds
+        if confidence >= 0.70:
+            risk = "High"
+        elif confidence >= 0.40:
+            risk = "Medium"
         else:
-            risk_level = "Low"
+            risk = "Low"
 
-        # Get explanations
+        # Explanations
         explanations = self.get_explanations(matched_rules)
-
-        # Add URL-based explanations if suspicious links found
         if suspicious_urls:
             explanations.append(f"Email contains {len(suspicious_urls)} suspicious link(s).")
 
+        # Reasons: combine matched rules + url-based reason id (if any)
+        reasons = matched_rules[:]
+        if suspicious_urls:
+            reasons.append('suspicious_link')
+
+        # Ensure uniqueness
+        reasons = list(dict.fromkeys(reasons))
+
         return DetectionResult(
-            risk_level=risk_level,
-            confidence_score=round(confidence_score, 2),
-            reasons=matched_rules + (['suspicious_urls'] if suspicious_urls else []),
+            risk_level=risk,
+            confidence_score=round(confidence, 2),
+            reasons=reasons,
             explanations=explanations,
             suspicious_links=suspicious_urls,
         )
