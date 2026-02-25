@@ -96,3 +96,8 @@ injectStyles();
 const emailBody = document.querySelector('.body');
 highlightRiskyText(emailBody);
 
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.type === "REQUEST_SCAN") {
+    requestScan();
+  }
+});
