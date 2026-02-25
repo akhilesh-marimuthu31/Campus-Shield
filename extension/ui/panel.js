@@ -1,3 +1,4 @@
+console.log("Panel rendering started", result);
 (function () {
   console.log("✅ CampusShield panel script loaded");
 
