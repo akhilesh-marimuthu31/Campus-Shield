@@ -1,8 +1,45 @@
-<!-- ui/panel.html -->
-<div id="cs-panel" class="cs-panel">
-  <div class="header"><h4>CampusShield</h4><span id="riskLabel"></span></div>
-  <div id="explanation"></div>
-  <div id="links"></div>
-  <div id="teachback" class="teachback"></div>
-  <div class="footer"><button id="closeBtn">Close</button></div>
-</div>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>CampusShield — Scan Result</title>
+<link rel="stylesheet" href="panel.css" />
+</head>
+<body>
+  <div id="cs-panel" role="dialog" aria-labelledby="cs-title">
+    <header class="cs-header">
+      <div id="cs-title">CampusShield</div>
+      <button id="cs-close" aria-label="Close panel">&times;</button>
+    </header>
+
+    <main id="cs-main" tabindex="0">
+      <div id="cs-summary" class="cs-summary">
+        <div id="cs-risk" class="cs-risk">—</div>
+        <div id="cs-confidence" class="cs-confidence">—</div>
+      </div>
+
+      <section id="cs-explain" class="cs-explain" aria-live="polite">
+        <!-- explanation bullets will be injected here -->
+      </section>
+
+      <section id="cs-links" class="cs-links">
+        <h4>Suspicious links</h4>
+        <ul id="cs-links-list"></ul>
+      </section>
+
+      <section id="cs-teachback" class="cs-teachback">
+        <h4>Quick check — pick the suspicious phrase</h4>
+        <div id="cs-choices" class="cs-choices"></div>
+      </section>
+    </main>
+
+    <footer class="cs-footer">
+      <button id="cs-learn">How to stay safe</button>
+      <button id="cs-dismiss">Dismiss</button>
+    </footer>
+  </div>
+
+<script src="panel.js"></script>
+</body>
+</html>
