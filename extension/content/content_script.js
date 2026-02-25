@@ -6,7 +6,7 @@
  * - Inject & render in-page result panel (iframe)
  * - Highlight risky text and suspicious links
  */
-
+console.log("CampusShield content script running");
 import { extractEmailData } from "../utils/emailParser.js";
 
 /* ============================================================
