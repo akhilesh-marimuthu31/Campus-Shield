@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Mock Email – CampusShield Test</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f1f3f4;
+      margin: 0;
+      padding: 40px;
+    }
+
+    .email-container {
+      max-width: 800px;
+      margin: auto;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      padding: 24px;
+    }
+
+    .header {
+      border-bottom: 1px solid #ddd;
+      margin-bottom: 20px;
+      padding-bottom: 12px;
+    }
+
+    .sender {
+      font-weight: bold;
+      font-size: 14px;
+      color: #202124;
+    }
+
+    .subject {
+      font-size: 20px;
+      margin-top: 6px;
+      color: #202124;
+    }
+
+    .body {
+      font-size: 15px;
+      line-height: 1.6;
+      color: #202124;
+      margin-top: 20px;
+    }
+
+    .phish-link {
+      display: inline-block;
+      margin-top: 16px;
+      color: #1a73e8;
+      text-decoration: underline;
+      cursor: pointer;
+    }
+
+    .note {
+      margin-top: 30px;
+      font-size: 12px;
+      color: #5f6368;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="email-container">
+    <div class="header">
+      <div class="sender">admin@college-alerts.com</div>
+      <div class="subject">URGENT: Verify your account</div>
+    </div>
+
+    <div class="body">
+      Dear Student,<br><br>
+
+      Your college account has shown suspicious activity and will be
+      <strong>suspended immediately</strong> unless you verify your information.<br><br>
+
+      Please <strong>act now</strong> to avoid losing access to your student portal,
+      email, and examination services.<br><br>
+
+      Click the link below to verify your account:<br>
+
+      <a class="phish-link" href="http://fake-login.com">
+        http://fake-login.com
+      </a><br><br>
+
+      Failure to do so within 24 hours will result in permanent account suspension.<br><br>
+
+      Regards,<br>
+      IT Support Team
+    </div>
+
+    <div class="note">
+      This is a mock email page for CampusShield testing.
+    </div>
+  </div>
+</body>
+</html>
