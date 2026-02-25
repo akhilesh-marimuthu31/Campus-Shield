@@ -7,14 +7,10 @@
   "background": { "service_worker": "background/service_worker.js" },
   "action": { "default_popup": "ui/popup.html" },
   "content_scripts": [
-    {
-      "matches": ["<all_urls>"],
-      "js": [
-        "utils/explainFormatter.js",
-        "ui/panel.js",
-        "content/content_script.js"
-      ],
-      "run_at": "document_idle"
-    }
-  ]
+  {
+    "matches": ["<all_urls>"],
+    "js": ["content/content_script.js"],
+    "run_at": "document_idle"
+  }
+]
 }
