@@ -1,24 +1,20 @@
-// extension/utils/explainFormatter.js
-// Converts backend detection results into UI-friendly explanation blocks
+(function () {
+  function formatExplanation(result) {
+    if (!result) return "<p>No analysis available.</p>";
 
-export function formatExplanation(result) {
-  if (!result) {
-    return {
-      title: "Scan failed",
-      summary: "Unable to analyze this email.",
-      details: []
-    };
+    const { risk_level, confidence_score, explanations } = result;
+
+    return `
+      <h3>Risk Level: ${risk_level}</h3>
+      <p>Confidence: ${(confidence_score * 100).toFixed(0)}%</p>
+      <ul>
+        ${explanations.map(e => `<li>${e}</li>`).join("")}
+      </ul>
+    `;
   }
 
-  const { risk_level, confidence_score, explanations } = result;
-
-  let title = "Low Risk";
-  if (risk_level === "High") title = "High Risk Phishing";
-  else if (risk_level === "Medium") title = "Suspicious Email";
-
-  return {
-    title,
-    summary: `${risk_level} risk detected (${Math.round(confidence_score * 100)}% confidence)`,
-    details: explanations || []
+  // Expose globally
+  window.CampusShieldExplain = {
+    formatExplanation
   };
-}
+})();
