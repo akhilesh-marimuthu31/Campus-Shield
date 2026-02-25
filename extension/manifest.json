@@ -2,15 +2,19 @@
   "manifest_version": 3,
   "name": "CampusShield",
   "version": "0.2",
-  "permissions": ["activeTab", "storage"],
-  "host_permissions": ["http://localhost:5000/*"],
-  "action": {
-    "default_popup": "ui/popup.html"
-  },
+  "permissions": ["activeTab", "storage", "scripting"],
+  "host_permissions": ["http://127.0.0.1:5000/*", "http://localhost:5000/*"],
+  "background": { "service_worker": "background/service_worker.js" },
+  "action": { "default_popup": "ui/popup.html" },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["content/content_script.js"]
+      "js": [
+        "utils/explainFormatter.js",
+        "ui/panel.js",
+        "content/content_script.js"
+      ],
+      "run_at": "document_idle"
     }
   ]
 }
