@@ -24,7 +24,7 @@ document.getElementById("scanBtn").addEventListener("click", () => {
       (response) => {
         // Re-enable button after response
         scanBtn.disabled = false;
-        
+
         if (chrome.runtime.lastError) {
           console.error("[ERROR] Failed to send message:", chrome.runtime.lastError.message);
           // Check if it's because content script isn't injected

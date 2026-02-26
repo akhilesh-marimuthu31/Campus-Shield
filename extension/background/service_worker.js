@@ -10,7 +10,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ error: "Unknown message type" });
     return false;
   }
-
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
@@ -32,6 +31,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const safetyTimeout = setTimeout(() => {
     if (!responseSent) {
       console.error("CampusShield: Safety timeout - sending error response");
+
       safeSendResponse({
         ok: false,
         error: "Request timeout"
@@ -60,6 +60,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     .catch(err => {
       clearTimeout(safetyTimeout);
       console.error("CampusShield scan failed:", err);
+
       safeSendResponse({
         ok: false,
         error: err.name === "AbortError"
