@@ -36,10 +36,50 @@ const PHRASES = [
 /* ---------------- EXTRACT EMAIL ---------------- */
 
 function extractEmail() {
+  // Detect page type for better extraction
+  const isMockEmail = location.href.includes("mock_email.html");
+  const isGmail = location.hostname.includes("mail.google.com");
+  
+  let sender = "unknown";
+  let subject = "";
+  let body = "";
+  
+  if (isMockEmail) {
+    // Mock email page uses .sender, .subject, .body classes
+    sender = document.querySelector(".sender")?.innerText || "unknown";
+    subject = document.querySelector(".subject")?.innerText || "";
+    body = document.querySelector(".body")?.innerText || document.body.innerText;
+  } else if (isGmail) {
+    // Gmail-specific selectors (for opened email view)
+    const gmailSender = document.querySelector("h2[data-thread-perm-id]") || 
+                        document.querySelector("span[email]");
+    const gmailSubject = document.querySelector("h2[data-thread-perm-id]")?.textContent ||
+                         document.querySelector("h2")?.textContent || "";
+    const gmailBody = document.querySelector("div[data-message-id]")?.innerText ||
+                      document.querySelector(".ii.gt")?.innerText ||
+                      document.body.innerText;
+    
+    sender = gmailSender?.textContent?.trim() || gmailSender?.getAttribute("email") || "unknown";
+    subject = gmailSubject.trim();
+    body = gmailBody || document.body.innerText;
+  } else {
+    // Generic fallback: try common email selectors
+    sender = document.querySelector(".sender")?.innerText ||
+             document.querySelector("[data-sender]")?.textContent ||
+             "unknown";
+    subject = document.querySelector(".subject")?.innerText ||
+              document.querySelector("[data-subject]")?.textContent ||
+              document.querySelector("h1, h2")?.textContent ||
+              "";
+    body = document.querySelector(".body")?.innerText ||
+           document.querySelector("[data-body]")?.innerText ||
+           document.body.innerText;
+  }
+  
   return {
-    sender: document.querySelector(".sender")?.innerText || "unknown",
-    subject: document.querySelector(".subject")?.innerText || "",
-    body: document.querySelector(".body")?.innerText || document.body.innerText,
+    sender: sender,
+    subject: subject,
+    body: body,
     links: [...document.querySelectorAll("a")].map(a => a.href)
   };
 }
@@ -63,17 +103,71 @@ function injectPanel() {
     iframe.id = "campusshield-panel";
     iframe.src = chrome.runtime.getURL("ui/panel.html");
 
+    // Restore position from localStorage if available
+    const savedPos = localStorage.getItem("campusshield-panel-pos");
+    let top = "90px";
+    let right = "20px";
+    if (savedPos) {
+      try {
+        const pos = JSON.parse(savedPos);
+        top = pos.top || top;
+        right = pos.right || right;
+      } catch (e) {
+        // Invalid saved position, use defaults
+      }
+    }
+
     Object.assign(iframe.style, {
       position: "fixed",
-      top: "90px",
-      right: "20px",
+      top: top,
+      right: right,
       width: "360px",
       height: "420px",
       border: "none",
       borderRadius: "12px",
       zIndex: "2147483647",
-      boxShadow: "0 20px 60px rgba(0,0,0,0.4)"
+      boxShadow: "0 20px 60px rgba(0,0,0,0.4)",
+      cursor: "default"
     });
+
+    // Make iframe draggable by handling drag on header
+    let isDragging = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let startTop = 0;
+    let startRight = 0;
+
+    // Listen for drag messages from panel
+    const dragHandler = (event) => {
+      if (event.data?.type === "CS_PANEL_DRAG_START") {
+        isDragging = true;
+        const rect = iframe.getBoundingClientRect();
+        dragStartX = event.data.clientX;
+        dragStartY = event.data.clientY;
+        startTop = rect.top;
+        startRight = window.innerWidth - rect.right;
+      } else if (event.data?.type === "CS_PANEL_DRAG_MOVE" && isDragging) {
+        const rect = iframe.getBoundingClientRect();
+        const deltaX = event.data.clientX - dragStartX;
+        const deltaY = event.data.clientY - dragStartY;
+        const newTop = Math.max(0, Math.min(window.innerHeight - rect.height, startTop + deltaY));
+        const newRight = Math.max(0, Math.min(window.innerWidth - rect.width, startRight - deltaX));
+        iframe.style.top = `${newTop}px`;
+        iframe.style.right = `${newRight}px`;
+      } else if (event.data?.type === "CS_PANEL_DRAG_END" && isDragging) {
+        isDragging = false;
+        // Save position to localStorage
+        const rect = iframe.getBoundingClientRect();
+        const pos = {
+          top: `${rect.top}px`,
+          right: `${window.innerWidth - rect.right}px`
+        };
+        localStorage.setItem("campusshield-panel-pos", JSON.stringify(pos));
+      }
+    };
+    
+    // Use a single listener that checks for our panel's messages
+    window.addEventListener("message", dragHandler);
 
     iframe.addEventListener("load", () => resolve(iframe), { once: true });
 

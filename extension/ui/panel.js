@@ -107,18 +107,105 @@ function setupDismissButtons() {
   }
 
   if (closeBtn) {
-    closeBtn.addEventListener("click", removePanel);
+    closeBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      removePanel();
+    });
+    // Also handle mouseup to ensure click fires
+    closeBtn.addEventListener("mouseup", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
   }
   if (dismissBtn) {
-    dismissBtn.addEventListener("click", removePanel);
+    dismissBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      removePanel();
+    });
   }
 }
 
-// Initialize dismiss buttons when DOM is ready
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', setupDismissButtons);
-} else {
+// Make panel header draggable
+function setupDragging() {
+  const header = document.querySelector(".cs-header");
+  const panel = document.getElementById("cs-panel");
+  
+  if (!header || !panel) return;
+  
+  let isDragging = false;
+  let startX = 0;
+  let startY = 0;
+  
+  // Make header cursor indicate draggable
+  header.style.cursor = "move";
+  header.style.userSelect = "none";
+  
+  // Prevent text selection while dragging
+  header.addEventListener("selectstart", (e) => e.preventDefault());
+  
+  header.addEventListener("mousedown", (e) => {
+    // Don't start drag if clicking the close button
+    if (e.target.id === "cs-close" || e.target.closest("#cs-close")) {
+      return;
+    }
+    
+    isDragging = true;
+    startX = e.clientX;
+    startY = e.clientY;
+    
+    // Notify parent window of drag start
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({
+        type: "CS_PANEL_DRAG_START",
+        clientX: e.clientX,
+        clientY: e.clientY
+      }, "*");
+    }
+    
+    e.preventDefault();
+  });
+  
+  document.addEventListener("mousemove", (e) => {
+    if (!isDragging) return;
+    
+    // Notify parent window of drag move
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({
+        type: "CS_PANEL_DRAG_MOVE",
+        clientX: e.clientX,
+        clientY: e.clientY
+      }, "*");
+    }
+    
+    e.preventDefault();
+  });
+  
+  document.addEventListener("mouseup", () => {
+    if (isDragging) {
+      isDragging = false;
+      
+      // Notify parent window of drag end
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: "CS_PANEL_DRAG_END"
+        }, "*");
+      }
+    }
+  });
+}
+
+// Initialize dismiss buttons and dragging when DOM is ready
+function initializePanel() {
   setupDismissButtons();
+  setupDragging();
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initializePanel);
+} else {
+  initializePanel();
 }
 
 window.addEventListener("message", (event) => {

@@ -19,12 +19,26 @@ document.getElementById("scanBtn").addEventListener("click", () => {
       (response) => {
         if (chrome.runtime.lastError) {
           console.error("[ERROR] Failed to send message:", chrome.runtime.lastError.message);
-          // Check if it's because content script isn't injected (not an email page)
-          if (chrome.runtime.lastError.message.includes("Could not establish connection")) {
-            statusEl.innerText = "Not an email page. Open an email to scan.";
-            statusEl.style.color = "orange";
+          // Check if it's because content script isn't injected
+          const errorMsg = chrome.runtime.lastError.message;
+          if (errorMsg.includes("Could not establish connection")) {
+            // Content script may not be injected yet - check if it's a supported page
+            const url = tab.url || "";
+            const isSupported = url.includes("mock_email.html") || 
+                               url.includes("mail.google.com") ||
+                               url.startsWith("http://localhost") ||
+                               url.startsWith("http://127.0.0.1");
+            
+            if (isSupported) {
+              // Page is supported but script not injected yet - try again after delay
+              statusEl.innerText = "Initializing... Please try again.";
+              statusEl.style.color = "orange";
+            } else {
+              statusEl.innerText = "Not an email page. Open an email to scan.";
+              statusEl.style.color = "orange";
+            }
           } else {
-            statusEl.innerText = "Error: " + chrome.runtime.lastError.message;
+            statusEl.innerText = "Error: " + errorMsg;
             statusEl.style.color = "red";
           }
           return;

@@ -19,10 +19,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       try {
         sendResponse(response);
       } catch (err) {
+        // Port may already be closed - this is expected if service worker was terminated
         console.error("CampusShield: Error sending response:", err);
       }
     }
   };
+
+  // Safety timeout: ensure sendResponse is called even if fetch hangs
+  const safetyTimeout = setTimeout(() => {
+    if (!responseSent) {
+      console.error("CampusShield: Safety timeout - sending error response");
+      safeSendResponse({
+        ok: false,
+        error: "Request timeout"
+      });
+    }
+  }, REQUEST_TIMEOUT_MS + 1000);
 
   fetch(BACKEND_URL, {
     method: "POST",
@@ -39,9 +51,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return res.json();
     })
     .then(data => {
+      clearTimeout(safetyTimeout);
       safeSendResponse({ ok: true, result: data });
     })
     .catch(err => {
+      clearTimeout(safetyTimeout);
       console.error("CampusShield scan failed:", err);
       safeSendResponse({
         ok: false,
@@ -55,5 +69,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     });
 
   // IMPORTANT: return true to keep message channel open for async response
+  // This tells Chrome to keep the port open until sendResponse is called
   return true;
 });
