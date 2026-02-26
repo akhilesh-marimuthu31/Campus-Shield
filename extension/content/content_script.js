@@ -50,7 +50,6 @@ function injectPanel() {
   return new Promise((resolve) => {
     const existing = document.getElementById("campusshield-panel");
     if (existing) {
-      console.log("[DEBUG] Panel iframe already exists");
       // If iframe already exists, check if it's loaded
       if (existing.contentWindow) {
         resolve(existing);
@@ -60,7 +59,6 @@ function injectPanel() {
       return;
     }
 
-    console.log("[DEBUG] Creating panel iframe");
     const iframe = document.createElement("iframe");
     iframe.id = "campusshield-panel";
     iframe.src = chrome.runtime.getURL("ui/panel.html");
@@ -77,10 +75,7 @@ function injectPanel() {
       boxShadow: "0 20px 60px rgba(0,0,0,0.4)"
     });
 
-    iframe.addEventListener("load", () => {
-      console.log("[DEBUG] Panel iframe loaded");
-      resolve(iframe);
-    }, { once: true });
+    iframe.addEventListener("load", () => resolve(iframe), { once: true });
 
     document.body.appendChild(iframe);
   });
@@ -105,27 +100,12 @@ function highlight(body, links) {
 /* ---------------- SCAN ---------------- */
 
 function requestScan() {
-  console.log("[DEBUG] requestScan() called");
-  
   injectPanel().then((iframe) => {
-    console.log("[DEBUG] Panel ready, extracting email data");
     const payload = extractEmail();
-    console.log("[DEBUG] Email extracted", { 
-      sender: payload.sender, 
-      subject: payload.subject,
-      bodyLength: payload.body.length,
-      linksCount: payload.links.length
-    });
 
-    console.log("[DEBUG] Sending scanEmail message to background");
     chrome.runtime.sendMessage(
       { type: "scanEmail", payload },
       (res) => {
-        console.log("[DEBUG] Received response from background", { 
-          ok: res?.ok,
-          hasResult: !!res?.result
-        });
-
         const safeResult = res?.ok
           ? res.result
           : {
@@ -135,35 +115,26 @@ function requestScan() {
               suspicious_links: []
             };
 
-        console.log("[DEBUG] Posting result to panel iframe", {
-          riskLevel: safeResult.risk_level,
-          confidenceScore: safeResult.confidence_score,
-          explanationsCount: safeResult.explanations?.length || 0
-        });
-
         if (iframe && iframe.contentWindow) {
           iframe.contentWindow.postMessage(
             { type: "CS_SCAN_RESULT", payload: safeResult },
             "*"
           );
-          console.log("[DEBUG] Result posted to panel");
         } else {
-          console.error("[ERROR] Panel iframe or contentWindow not available");
+          console.error("CampusShield: Panel iframe or contentWindow not available");
         }
 
         const body = document.querySelector(".body") || document.body;
         highlight(body, safeResult.suspicious_links || []);
-        console.log("[DEBUG] Highlighting complete");
       }
     );
   }).catch((err) => {
-    console.error("[ERROR] Failed to inject panel:", err);
+    console.error("CampusShield: Failed to inject panel:", err);
   });
 }
 
 // Legacy function name for backward compatibility
 function scanEmail() {
-  console.log("[DEBUG] scanEmail() called (legacy, redirecting to requestScan)");
   requestScan();
 }
 

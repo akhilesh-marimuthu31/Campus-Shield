@@ -238,7 +238,7 @@ class PhishingDetector:
                 explanations.append(rule_map[rid])
         return explanations
 
-    def analyze(self, sender: str, subject: str, body: str) -> DetectionResult:
+    def analyze(self, sender: str, subject: str, body: str, links: List[str] = None) -> DetectionResult:
         """
         Perform comprehensive phishing analysis.
 
@@ -253,14 +253,17 @@ class PhishingDetector:
         # Combine text for analysis; mask PII in returned explanations if needed (we avoid storing raw text)
         full_text = f"{subject or ''} {body or ''}"
 
-        # Extract URLs from subject+body
-        urls = self.detect_urls(full_text)
+        # Extract URLs from subject+body text AND from provided links array
+        urls_from_text = self.detect_urls(full_text)
+        urls_from_links = links if links else []
+        # Combine and deduplicate URLs
+        all_urls = list(dict.fromkeys(urls_from_text + urls_from_links))
 
         # Rule-based matches and score
         matched_rules, rule_score = self.check_rules(full_text)
 
         # URL analysis and URL-based score
-        suspicious_urls, url_score = self.analyze_urls(urls, sender or "")
+        suspicious_urls, url_score = self.analyze_urls(all_urls, sender or "")
 
         # Compose base confidence from rules + urls
         confidence = min(rule_score + url_score, 1.0)

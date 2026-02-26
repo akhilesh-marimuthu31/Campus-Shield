@@ -1,7 +1,4 @@
-console.log("[DEBUG] Popup script loaded");
-
 document.getElementById("scanBtn").addEventListener("click", () => {
-  console.log("[DEBUG] Scan button clicked");
   const statusEl = document.getElementById("status");
   statusEl.innerText = "Scanning...";
   statusEl.style.color = "";
@@ -15,7 +12,6 @@ document.getElementById("scanBtn").addEventListener("click", () => {
     }
 
     const tab = tabs[0];
-    console.log("[DEBUG] Sending REQUEST_SCAN to tab", { tabId: tab.id, url: tab.url });
 
     chrome.tabs.sendMessage(
       tab.id,
@@ -34,7 +30,6 @@ document.getElementById("scanBtn").addEventListener("click", () => {
           return;
         }
 
-        console.log("[DEBUG] Message sent successfully", { response });
         // Content script will handle the scan, just show success message
         statusEl.innerText = "Scan requested. Check the panel on the page.";
         statusEl.style.color = "green";

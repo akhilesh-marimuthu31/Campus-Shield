@@ -56,10 +56,16 @@ def create_app() -> Flask:
         if not re.match(email_regex, sender):
             return False, "Invalid sender email format", {}
         
+        # Extract links array if provided (optional field)
+        links = data.get('links', [])
+        if not isinstance(links, list):
+            links = []
+        
         return True, "", {
             'sender': sender,
             'subject': subject,
             'body': body,
+            'links': links,
         }
     
     # ============================================================================
@@ -113,6 +119,7 @@ def create_app() -> Flask:
                 sender=sanitized['sender'],
                 subject=sanitized['subject'],
                 body=sanitized['body'],
+                links=sanitized.get('links', []),
             )
             
             # Return structured response (no raw email content logged)

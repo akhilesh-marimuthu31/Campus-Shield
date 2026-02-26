@@ -19,5 +19,11 @@
       "js": ["content/content_script.js"],
       "run_at": "document_idle"
     }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["ui/panel.html", "ui/panel.js", "ui/panel.css"],
+      "matches": ["http://*/*", "https://*/*"]
+    }
   ]
 }
