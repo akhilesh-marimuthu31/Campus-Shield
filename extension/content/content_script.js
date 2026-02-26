@@ -200,7 +200,7 @@ function sendMessageToPanel(iframe, message) {
 }
 
 function requestScan() {
-  injectPanel()
+  return injectPanel()
     .then((iframe) => {
       const payload = extractEmail();
 
