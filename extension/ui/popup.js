@@ -1,5 +1,9 @@
 document.getElementById("scanBtn").addEventListener("click", () => {
+  const scanBtn = document.getElementById("scanBtn");
   const statusEl = document.getElementById("status");
+  
+  // Disable button to prevent double-clicks
+  scanBtn.disabled = true;
   statusEl.innerText = "Scanning...";
   statusEl.style.color = "";
 
@@ -8,6 +12,7 @@ document.getElementById("scanBtn").addEventListener("click", () => {
       console.error("[ERROR] No active tab found");
       statusEl.innerText = "Error: No active tab";
       statusEl.style.color = "red";
+      scanBtn.disabled = false;
       return;
     }
 
@@ -17,6 +22,9 @@ document.getElementById("scanBtn").addEventListener("click", () => {
       tab.id,
       { type: "REQUEST_SCAN" },
       (response) => {
+        // Re-enable button after response
+        scanBtn.disabled = false;
+        
         if (chrome.runtime.lastError) {
           console.error("[ERROR] Failed to send message:", chrome.runtime.lastError.message);
           // Check if it's because content script isn't injected

@@ -2,10 +2,74 @@ console.log("✅ CampusShield panel loaded");
 
 // Queue for messages that arrive before DOM is ready
 let pendingResult = null;
+let isScanning = false;
+
+function renderScanning() {
+  isScanning = true;
+  
+  const riskEl = document.getElementById("cs-risk");
+  if (riskEl) {
+    riskEl.innerText = "Scanning...";
+    riskEl.style.color = "var(--muted)";
+  }
+
+  const scoreEl = document.getElementById("cs-confidence");
+  if (scoreEl) {
+    scoreEl.innerText = "—";
+  }
+
+  const explainSection = document.getElementById("cs-explain");
+  if (explainSection) {
+    let list = explainSection.querySelector("ul");
+    if (!list) {
+      list = document.createElement("ul");
+      explainSection.appendChild(list);
+    }
+    list.innerHTML = "<li style='color: var(--muted);'>Analyzing email...</li>";
+  }
+
+  const linksList = document.getElementById("cs-links-list");
+  if (linksList) {
+    linksList.innerHTML = "<li style='color: var(--muted);'>Checking links...</li>";
+  }
+}
+
+function renderError(errorMessage) {
+  isScanning = false;
+  
+  const riskEl = document.getElementById("cs-risk");
+  if (riskEl) {
+    riskEl.innerText = "Error";
+    riskEl.style.color = "var(--danger)";
+  }
+
+  const scoreEl = document.getElementById("cs-confidence");
+  if (scoreEl) {
+    scoreEl.innerText = "—";
+  }
+
+  const explainSection = document.getElementById("cs-explain");
+  if (explainSection) {
+    let list = explainSection.querySelector("ul");
+    if (!list) {
+      list = document.createElement("ul");
+      explainSection.appendChild(list);
+    }
+    list.innerHTML = `<li style='color: var(--danger);'>${errorMessage || "Scan failed"}</li>`;
+  }
+
+  const linksList = document.getElementById("cs-links-list");
+  if (linksList) {
+    linksList.innerHTML = "<li style='color: var(--muted);'>—</li>";
+  }
+}
 
 function renderResult(result) {
+  isScanning = false;
+  
   if (!result) {
     console.warn("⚠️ CampusShield: renderResult called with no result");
+    renderError("No result received");
     return;
   }
 
@@ -19,8 +83,7 @@ function renderResult(result) {
   const riskEl = document.getElementById("cs-risk");
   if (riskEl) {
     riskEl.innerText = result.risk_level || "Unknown";
-  } else {
-    console.warn("⚠️ CampusShield: Element #cs-risk not found");
+    riskEl.style.color = ""; // Reset to default
   }
 
   // Safely access confidence_score
@@ -28,8 +91,6 @@ function renderResult(result) {
   if (scoreEl) {
     const score = result.confidence_score != null ? Math.round(result.confidence_score * 100) : 0;
     scoreEl.innerText = score + "%";
-  } else {
-    console.warn("⚠️ CampusShield: Element #cs-confidence not found");
   }
 
   // Safely access explanations
@@ -46,8 +107,6 @@ function renderResult(result) {
       li.textContent = e;
       list.appendChild(li);
     });
-  } else {
-    console.warn("⚠️ CampusShield: Element #cs-explain not found");
   }
 
   // Safely access suspicious_links (ensure array; backend must return a list)
@@ -73,8 +132,6 @@ function renderResult(result) {
       li.style.color = "var(--muted)";
       linksList.appendChild(li);
     }
-  } else {
-    console.warn("⚠️ CampusShield: Element #cs-links-list not found");
   }
 }
 
@@ -85,6 +142,7 @@ if (document.readyState === 'loading') {
       renderResult(pendingResult);
       pendingResult = null;
     }
+    initializePanel();
   });
 } else {
   // DOM already ready
@@ -92,6 +150,7 @@ if (document.readyState === 'loading') {
     renderResult(pendingResult);
     pendingResult = null;
   }
+  initializePanel();
 }
 
 // Handle dismiss/close buttons
@@ -209,6 +268,13 @@ if (document.readyState === 'loading') {
 }
 
 window.addEventListener("message", (event) => {
+  // Handle scan start message - show loading state
+  if (event.data?.type === "CS_SCAN_START") {
+    renderScanning();
+    return;
+  }
+
+  // Handle scan result message
   if (event.data?.type !== "CS_SCAN_RESULT") return;
 
   // Safely handle undefined/null payload
@@ -217,5 +283,6 @@ window.addEventListener("message", (event) => {
     renderResult(result);
   } else {
     console.warn("⚠️ CampusShield: Received CS_SCAN_RESULT with no payload");
+    renderError("Invalid response from backend");
   }
 });

@@ -14,22 +14,27 @@ html,body{height:100%;margin:0;background:transparent}
 #cs-panel{
   width:320px;height:420px;background:linear-gradient(180deg,var(--card),#061026);
   color:var(--text);border-radius:10px;padding:12px;display:flex;flex-direction:column;
-  box-shadow:0 10px 30px rgba(2,6,23,0.6);outline:none;
+  box-shadow:0 10px 30px rgba(2,6,23,0.6);outline:none;overflow:hidden;
 }
 .cs-header{display:flex;align-items:center;justify-content:space-between;padding:6px}
 #cs-title{font-weight:700;font-size:16px}
-#cs-close{background:transparent;border:0;color:var(--muted);font-size:20px;cursor:pointer}
+#cs-close{background:transparent;border:0;color:var(--muted);font-size:20px;cursor:pointer;padding:0;min-width:24px;text-align:center}
+#cs-close:hover{color:var(--text)}
 .cs-summary{display:flex;gap:10px;align-items:center;padding:8px 0}
-.cs-risk{font-weight:700;padding:8px;border-radius:8px;background:rgba(255,255,255,0.03)}
-.cs-confidence{font-size:13px;color:var(--muted)}
-.cs-explain{flex:1; margin-top:8px; overflow:auto;padding-right:6px}
+.cs-risk{font-weight:700;padding:8px;border-radius:8px;background:rgba(255,255,255,0.03);min-height:24px;display:flex;align-items:center}
+.cs-confidence{font-size:13px;color:var(--muted);min-width:40px}
+#cs-main{flex:1;overflow:auto;padding-right:6px}
+.cs-explain{margin-top:8px;overflow:auto;padding-right:6px}
 .cs-explain ul{padding-left:18px;margin:6px 0}
 .cs-links{font-size:13px;color:var(--muted);margin-top:8px}
+.cs-links h4{margin:4px 0}
 .cs-links ul{list-style:none;padding-left:0;margin:6px 0}
-.cs-links li{padding:6px 8px;border-radius:6px;background:rgba(255,255,255,0.02);margin-bottom:6px}
-.cs-links a{color:var(--accent);text-decoration:underline}
-.cs-footer{display:flex;gap:8px;justify-content:flex-end;padding-top:8px}
-button{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.03);color:var(--text);padding:8px 10px;border-radius:6px;cursor:pointer}
+.cs-links li{padding:6px 8px;border-radius:6px;background:rgba(255,255,255,0.02);margin-bottom:6px;overflow-wrap:break-word}
+.cs-links a{color:var(--accent);text-decoration:underline;word-break:break-all}
+.cs-footer{display:flex;gap:8px;justify-content:flex-end;padding-top:8px;border-top:1px solid rgba(255,255,255,0.03)}
+button{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.03);color:var(--text);padding:8px 10px;border-radius:6px;cursor:pointer;font-size:12px}
+button:hover:not(:disabled){background:rgba(255,255,255,0.06)}
+button:disabled{opacity:0.5;cursor:not-allowed}
 button#cs-learn{background:transparent;border:1px dashed rgba(255,255,255,0.04);font-size:13px}
 .cs-teachback{margin-top:8px}
 .cs-choices{display:flex;gap:6px;flex-wrap:wrap}

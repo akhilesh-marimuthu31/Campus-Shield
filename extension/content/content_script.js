@@ -191,59 +191,97 @@ function highlight(body, links) {
   });
 }
 
-/* ---------------- SCAN ---------------- */
+/* ---------------- SCAN (PROMISE-BASED) ---------------- */
+
+function sendMessageToPanel(iframe, message) {
+  if (iframe && iframe.contentWindow) {
+    iframe.contentWindow.postMessage(message, "*");
+  }
+}
 
 function requestScan() {
-  injectPanel().then((iframe) => {
-    const payload = extractEmail();
+  injectPanel()
+    .then((iframe) => {
+      const payload = extractEmail();
 
-    chrome.runtime.sendMessage(
-      { type: "scanEmail", payload },
-      (res) => {
-        // Handle case where response callback might not be called (service worker died, etc.)
-        if (chrome.runtime.lastError) {
-          console.error("CampusShield: Message error:", chrome.runtime.lastError.message);
-          const errorResult = {
-            risk_level: "Unknown",
-            confidence_score: 0,
-            explanations: ["Failed to communicate with backend"],
-            suspicious_links: []
-          };
-          if (iframe && iframe.contentWindow) {
-            iframe.contentWindow.postMessage(
-              { type: "CS_SCAN_RESULT", payload: errorResult },
-              "*"
-            );
-          }
-          return;
-        }
+      // Notify panel that scan is starting
+      sendMessageToPanel(iframe, { type: "CS_SCAN_START" });
 
-        // Safely handle undefined/null response
-        const safeResult = (res && res.ok && res.result)
-          ? res.result
-          : {
-              risk_level: "Unknown",
+      // Use Promise-based messaging: wrap sendMessage callback in Promise
+      return new Promise((resolve) => {
+        const timeout = setTimeout(() => {
+          console.error("CampusShield: Backend request timeout");
+          sendMessageToPanel(iframe, {
+            type: "CS_SCAN_RESULT",
+            payload: {
+              risk_level: "Error",
               confidence_score: 0,
-              explanations: res?.error ? [res.error] : ["Backend not reachable"],
+              explanations: ["Request timeout - backend unreachable"],
               suspicious_links: []
-            };
+            }
+          });
+          resolve();
+        }, 8000);
 
-        if (iframe && iframe.contentWindow) {
-          iframe.contentWindow.postMessage(
-            { type: "CS_SCAN_RESULT", payload: safeResult },
-            "*"
-          );
-        } else {
-          console.error("CampusShield: Panel iframe or contentWindow not available");
-        }
+        chrome.runtime.sendMessage(
+          { type: "scanEmail", payload },
+          (res) => {
+            clearTimeout(timeout);
 
-        const body = document.querySelector(".body") || document.body;
-        highlight(body, safeResult.suspicious_links || []);
-      }
-    );
-  }).catch((err) => {
-    console.error("CampusShield: Failed to inject panel:", err);
-  });
+            // Handle chrome.runtime.lastError (message port closed, etc.)
+            if (chrome.runtime.lastError) {
+              console.error("CampusShield: Message error:", chrome.runtime.lastError.message);
+              sendMessageToPanel(iframe, {
+                type: "CS_SCAN_RESULT",
+                payload: {
+                  risk_level: "Error",
+                  confidence_score: 0,
+                  explanations: ["Failed to communicate: " + chrome.runtime.lastError.message],
+                  suspicious_links: []
+                }
+              });
+              resolve();
+              return;
+            }
+
+            // Safely validate response structure
+            let safeResult;
+            if (res && res.ok && res.result) {
+              safeResult = res.result;
+            } else if (res && res.error) {
+              safeResult = {
+                risk_level: "Error",
+                confidence_score: 0,
+                explanations: [res.error],
+                suspicious_links: []
+              };
+            } else {
+              safeResult = {
+                risk_level: "Error",
+                confidence_score: 0,
+                explanations: ["Backend not reachable or invalid response"],
+                suspicious_links: []
+              };
+            }
+
+            // Send result to panel
+            sendMessageToPanel(iframe, {
+              type: "CS_SCAN_RESULT",
+              payload: safeResult
+            });
+
+            // Highlight suspicious links in the page
+            const body = document.querySelector(".body") || document.body;
+            highlight(body, safeResult.suspicious_links || []);
+
+            resolve();
+          }
+        );
+      });
+    })
+    .catch((err) => {
+      console.error("CampusShield: Failed to inject panel:", err);
+    });
 }
 
 // Legacy function name for backward compatibility
