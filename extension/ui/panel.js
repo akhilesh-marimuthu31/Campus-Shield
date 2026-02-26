@@ -94,9 +94,41 @@ if (document.readyState === 'loading') {
   }
 }
 
+// Handle dismiss/close buttons
+function setupDismissButtons() {
+  const closeBtn = document.getElementById("cs-close");
+  const dismissBtn = document.getElementById("cs-dismiss");
+
+  function removePanel() {
+    // Send message to parent window (content script) to remove the iframe
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({ type: "CS_REMOVE_PANEL" }, "*");
+    }
+  }
+
+  if (closeBtn) {
+    closeBtn.addEventListener("click", removePanel);
+  }
+  if (dismissBtn) {
+    dismissBtn.addEventListener("click", removePanel);
+  }
+}
+
+// Initialize dismiss buttons when DOM is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', setupDismissButtons);
+} else {
+  setupDismissButtons();
+}
+
 window.addEventListener("message", (event) => {
   if (event.data?.type !== "CS_SCAN_RESULT") return;
 
-  const result = event.data.payload;
-  renderResult(result);
+  // Safely handle undefined/null payload
+  const result = event.data?.payload;
+  if (result) {
+    renderResult(result);
+  } else {
+    console.warn("⚠️ CampusShield: Received CS_SCAN_RESULT with no payload");
+  }
 });

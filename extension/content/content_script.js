@@ -106,12 +106,31 @@ function requestScan() {
     chrome.runtime.sendMessage(
       { type: "scanEmail", payload },
       (res) => {
-        const safeResult = res?.ok
+        // Handle case where response callback might not be called (service worker died, etc.)
+        if (chrome.runtime.lastError) {
+          console.error("CampusShield: Message error:", chrome.runtime.lastError.message);
+          const errorResult = {
+            risk_level: "Unknown",
+            confidence_score: 0,
+            explanations: ["Failed to communicate with backend"],
+            suspicious_links: []
+          };
+          if (iframe && iframe.contentWindow) {
+            iframe.contentWindow.postMessage(
+              { type: "CS_SCAN_RESULT", payload: errorResult },
+              "*"
+            );
+          }
+          return;
+        }
+
+        // Safely handle undefined/null response
+        const safeResult = (res && res.ok && res.result)
           ? res.result
           : {
               risk_level: "Unknown",
               confidence_score: 0,
-              explanations: ["Backend not reachable"],
+              explanations: res?.error ? [res.error] : ["Backend not reachable"],
               suspicious_links: []
             };
 
@@ -138,10 +157,38 @@ function scanEmail() {
   requestScan();
 }
 
+/* ---------------- REMOVE PANEL ---------------- */
+
+function removePanel() {
+  const iframe = document.getElementById("campusshield-panel");
+  if (iframe) {
+    iframe.remove();
+    console.log("✅ CampusShield: Panel removed");
+  }
+}
+
 /* ---------------- LISTENER ---------------- */
 
-chrome.runtime.onMessage.addListener(msg => {
-  if (msg?.type === "REQUEST_SCAN") scanEmail();
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg?.type === "REQUEST_SCAN") {
+    scanEmail();
+    // Synchronous handler, no need to return true
+    return false;
+  }
+  if (msg?.type === "REMOVE_PANEL") {
+    removePanel();
+    sendResponse({ success: true });
+    return false;
+  }
+  return false;
+});
+
+// Listen for postMessage from panel iframe to remove itself
+window.addEventListener("message", (event) => {
+  // Only accept messages from our extension origin
+  if (event.data?.type === "CS_REMOVE_PANEL") {
+    removePanel();
+  }
 });
 
 console.log("✅ CampusShield content script initialized");

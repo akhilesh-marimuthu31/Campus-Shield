@@ -4,10 +4,25 @@ const BACKEND_URL = "http://127.0.0.1:5000/scan";
 const REQUEST_TIMEOUT_MS = 5000;
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type !== "scanEmail") return;
+  if (message.type !== "scanEmail") {
+    return false;
+  }
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  // Track if sendResponse has been called to prevent double-calling
+  let responseSent = false;
+  const safeSendResponse = (response) => {
+    if (!responseSent) {
+      responseSent = true;
+      try {
+        sendResponse(response);
+      } catch (err) {
+        console.error("CampusShield: Error sending response:", err);
+      }
+    }
+  };
 
   fetch(BACKEND_URL, {
     method: "POST",
@@ -24,11 +39,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return res.json();
     })
     .then(data => {
-      sendResponse({ ok: true, result: data });
+      safeSendResponse({ ok: true, result: data });
     })
     .catch(err => {
       console.error("CampusShield scan failed:", err);
-      sendResponse({
+      safeSendResponse({
         ok: false,
         error: err.name === "AbortError"
           ? "Backend timeout"
@@ -39,6 +54,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       clearTimeout(timeoutId);
     });
 
-  // IMPORTANT: keep message channel open for async response
+  // IMPORTANT: return true to keep message channel open for async response
   return true;
 });
