@@ -301,17 +301,29 @@ function removePanel() {
 
 /* ---------------- LISTENER ---------------- */
 
+// Message handler for popup and background messages
+// Pattern: Return true for async handlers, always call sendResponse
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type === "REQUEST_SCAN") {
-    scanEmail();
-    // Synchronous handler, no need to return true
-    return false;
+    // Async scan operation initiated from popup
+    // Return true to keep the message port open until sendResponse is called
+    // This prevents "message port closed" errors on async operations
+    requestScan().finally(() => {
+      // Always call sendResponse when async operation completes
+      // This ensures the popup callback fires and the port closes cleanly
+      sendResponse({ ok: true, status: "scan_initiated" });
+    });
+    return true;  // CRITICAL: Keep port open for async sendResponse
   }
+  
   if (msg?.type === "REMOVE_PANEL") {
     removePanel();
     sendResponse({ success: true });
-    return false;
+    return false;  // Synchronous - port closes after sendResponse
   }
+  
+  // Unknown message type - respond with error to prevent hanging
+  sendResponse({ error: "Unknown message type" });
   return false;
 });
 

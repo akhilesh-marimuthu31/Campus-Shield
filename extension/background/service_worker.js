@@ -4,7 +4,10 @@ const BACKEND_URL = "http://127.0.0.1:5000/scan";
 const REQUEST_TIMEOUT_MS = 5000;
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Only handle scanEmail messages from content scripts
   if (message.type !== "scanEmail") {
+    // Respond to unknown message types to prevent port from hanging
+    sendResponse({ error: "Unknown message type" });
     return false;
   }
 
