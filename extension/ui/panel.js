@@ -1,5 +1,12 @@
 console.log("✅ CampusShield panel loaded");
 
+// Mark panel origin for easier debugging/integration
+const rootPanel = document.getElementById("cs-panel");
+if (rootPanel) {
+  rootPanel.dataset.origin = "campusshield";
+  rootPanel.classList.add("campusshield-panel");
+}
+
 // Queue for messages that arrive before DOM is ready
 let pendingResult = null;
 let isScanning = false;

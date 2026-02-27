@@ -1,5 +1,16 @@
 console.log("✅ CampusShield content script running:", location.href);
 
+function logContent(level, message, data) {
+  const prefix = "[CampusShield content]";
+  if (level === "error") {
+    console.error(prefix, message, data || "");
+  } else if (level === "warn") {
+    console.warn(prefix, message, data || "");
+  } else {
+    console.debug(prefix, message, data || "");
+  }
+}
+
 /* ---------------- CONFIG ---------------- */
 
 const PHRASES = [
@@ -33,12 +44,50 @@ const PHRASES = [
   document.head.appendChild(style);
 })();
 
-/* ---------------- EXTRACT EMAIL ---------------- */
+/* ---------------- PAGE DETECTION & EXTRACT EMAIL ---------------- */
+
+function isGmailHost() {
+  return location.hostname.includes("mail.google.com");
+}
+
+function isMockEmailPage() {
+  return location.href.includes("mock_email.html") || !!document.querySelector(".email-container");
+}
+
+function isLikelyEmailView() {
+  if (isMockEmailPage()) {
+    return true;
+  }
+  if (isGmailHost()) {
+    // Gmail message view containers
+    if (document.querySelector("div[role='main'] .adn")) return true;
+    if (document.querySelector("div.ii")) return true;
+    if (document.querySelector("div.a3s")) return true;
+  }
+  // Generic fallback: presence of typical email DOM
+  if (document.querySelector(".sender") && document.querySelector(".subject")) return true;
+  return false;
+}
+
+// Track when a likely email is visible (used by PROBE and logging)
+window.__campusshield_page_ready = isLikelyEmailView();
+
+const csMutationObserver = new MutationObserver(() => {
+  const ready = isLikelyEmailView();
+  if (ready !== window.__campusshield_page_ready) {
+    window.__campusshield_page_ready = ready;
+    logContent("debug", "Page readiness changed", { ready });
+  }
+});
+
+if (document.body) {
+  csMutationObserver.observe(document.body, { childList: true, subtree: true });
+}
 
 function extractEmail() {
   // Detect page type for better extraction
-  const isMockEmail = location.href.includes("mock_email.html");
-  const isGmail = location.hostname.includes("mail.google.com");
+  const isMockEmail = isMockEmailPage();
+  const isGmail = isGmailHost();
   
   let sender = "unknown";
   let subject = "";
@@ -57,10 +106,11 @@ function extractEmail() {
                          document.querySelector("h2")?.textContent || "";
     const gmailBody = document.querySelector("div[data-message-id]")?.innerText ||
                       document.querySelector(".ii.gt")?.innerText ||
+                      document.querySelector(".a3s")?.innerText ||
                       document.body.innerText;
     
     sender = gmailSender?.textContent?.trim() || gmailSender?.getAttribute("email") || "unknown";
-    subject = gmailSubject.trim();
+    subject = (gmailSubject || "").trim();
     body = gmailBody || document.body.innerText;
   } else {
     // Generic fallback: try common email selectors
@@ -76,11 +126,21 @@ function extractEmail() {
            document.body.innerText;
   }
   
+  const links = [...document.querySelectorAll("a")].map(a => a.href);
+  logContent("debug", "Extracted email", {
+    isMockEmail,
+    isGmail,
+    senderPreview: sender,
+    subjectPreview: subject,
+    bodyLength: body.length,
+    linksCount: links.length
+  });
+  
   return {
-    sender: sender,
-    subject: subject,
-    body: body,
-    links: [...document.querySelectorAll("a")].map(a => a.href)
+    sender,
+    subject,
+    body,
+    links
   };
 }
 
@@ -304,6 +364,18 @@ function removePanel() {
 // Message handler for popup and background messages
 // Pattern: Return true for async handlers, always call sendResponse
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!msg || !msg.type) {
+    return false;
+  }
+
+  if (msg.type === "PROBE") {
+    // Lightweight health check so popup can decide whether to inject
+    const ready = window.__campusshield_page_ready === true;
+    logContent("debug", "Received PROBE", { ready });
+    sendResponse({ ok: true, pageReady: ready });
+    return false;
+  }
+
   if (msg?.type === "REQUEST_SCAN") {
     // Async scan operation initiated from popup
     // Return true to keep the message port open until sendResponse is called
