@@ -9,7 +9,7 @@ Returns a DetectionResult dataclass which can be converted to JSON by the API la
 
 import re
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 from urllib.parse import urlparse
 
 
@@ -21,6 +21,7 @@ class DetectionResult:
     reasons: List[str]  # Machine-readable rule violations
     explanations: List[str]  # Human-readable descriptions
     suspicious_links: List[str]  # Detected URLs
+    explanation: str = ""  # Natural language summary of why classified this way
 
 
 class PIIMasker:
@@ -62,6 +63,14 @@ class PIIMasker:
 
 class PhishingDetector:
     """Rule-based phishing detection engine."""
+
+    # Hardcoded allowlist of trusted domains (domain reputation)
+    TRUSTED_DOMAINS = {
+        'google.com', 'gmail.com', 'mail.google.com',
+        'github.com', 'amd.com', 'unstop.com',
+        'stanford.edu', 'harvard.edu', 'mit.edu',
+        'microsoft.com', 'apple.com', 'amazon.com'
+    }
 
     def __init__(self):
         """Initialize detection rules and patterns."""
@@ -238,19 +247,217 @@ class PhishingDetector:
                 explanations.append(rule_map[rid])
         return explanations
 
+    def _extract_base_domain(self, domain: str) -> str:
+        """Extract base domain from full domain (e.g., 'mail.google.com' -> 'google.com')."""
+        if not domain:
+            return ''
+        parts = domain.lower().split('.')
+        # For domains with 2 parts (like google.com), use as-is
+        # For 3+ parts (subdomains), use last 2 parts
+        if len(parts) >= 2:
+            return '.'.join(parts[-2:])
+        return domain.lower()
+
+    def _is_trusted_domain(self, domain: str) -> bool:
+        """Check if domain is in trusted allowlist."""
+        if not domain:
+            return False
+        base_domain = self._extract_base_domain(domain)
+        return base_domain in self.TRUSTED_DOMAINS
+
+    def _check_unsubscribe_or_footer(self, text: str, urls: List[str]) -> bool:
+        """
+        Check if email contains legitimate footer indicators:
+        - Unsubscribe link/text
+        - Company address/contact info
+        - Marketing footer patterns
+        """
+        text_lower = text.lower() if text else ''
+        
+        # Unsubscribe indicators
+        if any(pattern in text_lower for pattern in [
+            'unsubscribe', 'opt out', 'manage preferences',
+            'manage subscriptions', 'email preferences'
+        ]):
+            return True
+        
+        # Check if any URL is marked as unsubscribe
+        for url in (urls or []):
+            if any(keyword in url.lower() for keyword in ['unsubscribe', 'opt-out', 'manage']):
+                return True
+        
+        # Company footer patterns
+        if any(pattern in text_lower for pattern in [
+            '©', '(c)', 'all rights reserved',
+            'contact us', 'follow us on',
+            'powered by', 'terms of service'
+        ]):
+            return True
+        
+        return False
+
+    def _sender_domain_matches_link_domain(self, sender: str, links: List[str]) -> bool:
+        """
+        Check if sender's domain appears in the links.
+        E.g., email from sender@google.com with link to google.com/auth
+        """
+        if not sender or '@' not in sender or not links:
+            return False
+        
+        try:
+            sender_domain = self._extract_base_domain(sender.split('@')[1])
+        except Exception:
+            return False
+        
+        for link in links:
+            try:
+                link_domain = self._extract_domain(link)
+                if link_domain:
+                    link_base = self._extract_base_domain(link_domain)
+                    if link_base == sender_domain:
+                        return True
+            except Exception:
+                continue
+        
+        return False
+
+    def _has_urgency_and_verification_links(self, matched_rules: List[str], urls: List[str]) -> bool:
+        """
+        Check if email has BOTH urgency language AND links that look like verification/login.
+        This combination is a strong phishing signal.
+        """
+        has_urgency = 'urgency_pressure' in matched_rules
+        
+        if not has_urgency or not urls:
+            return False
+        
+        # Check if any URL looks like verification/login
+        verification_keywords = ['verify', 'login', 'signin', 'auth', 'confirm', 'account']
+        for url in urls:
+            if any(kw in url.lower() for kw in verification_keywords):
+                return True
+        
+        return False
+
+    def _should_amplify_risk(self, matched_rules: List[str], sender: str, urls: List[str]) -> float:
+        """
+        Risk amplification: increase score when multiple high-suspicion signals coexist.
+        Returns additional score to add (0 to amplify).
+        """
+        amplification = 0.0
+        
+        # Urgency + verification links = strong phishing signal
+        if self._has_urgency_and_verification_links(matched_rules, urls):
+            amplification += 0.15
+        
+        # Prize/reward + unknown sender (not trusted domain)
+        if 'prize_claim' in matched_rules:
+            sender_domain = sender.split('@')[1] if sender and '@' in sender else ''
+            if sender_domain and not self._is_trusted_domain(sender_domain):
+                amplification += 0.10
+        
+        # Account suspension + urgency (classic phishing combo)
+        if 'account_suspension' in matched_rules and 'urgency_pressure' in matched_rules:
+            # Already counted in individual weights, but this combo deserves attention
+            # However, we already added both weights, so don't double-count
+            pass
+        
+        return amplification
+
+    def _generate_explanation(self, risk_level: str, confidence: float, matched_rules: List[str], 
+                           suspicious_urls: List[str], sender: str, links: List[str],
+                           trust_signals: dict) -> str:
+        """
+        Generate a natural-language explanation of the classification.
+        
+        Args:
+            risk_level: High/Medium/Low
+            confidence: confidence score
+            matched_rules: matched rule IDs
+            suspicious_urls: detected suspicious URLs
+            sender: email sender
+            links: all links in email
+            trust_signals: dict with trust signal booleans
+        
+        Returns:
+            Natural language explanation string
+        """
+        parts = []
+        
+        # Start with base classification
+        if risk_level == 'High':
+            parts.append('This email has HIGH phishing risk.')
+        elif risk_level == 'Medium':
+            parts.append('This email has MEDIUM phishing risk.')
+        else:
+            parts.append('This email appears SAFE.')
+        
+        parts.append(f'Confidence: {int(confidence * 100)}%.')
+        
+        # Add threat signals detected
+        threat_details = []
+        if 'urgency_pressure' in matched_rules:
+            threat_details.append('high-pressure urgency language')
+        if 'verify_account' in matched_rules:
+            threat_details.append('requests for account verification')
+        if 'account_suspension' in matched_rules:
+            threat_details.append('threats of account suspension')
+        if 'password_request' in matched_rules:
+            threat_details.append('requests for password')
+        if 'payment_claim' in matched_rules:
+            threat_details.append('billing/payment claims')
+        if 'prize_claim' in matched_rules:
+            threat_details.append('prize/reward claims')
+        
+        if threat_details:
+            parts.append('Detected: ' + ', '.join(threat_details) + '.')
+        
+        # Add suspicious URLs info
+        if suspicious_urls:
+            parts.append(f'Found {len(suspicious_urls)} suspicious link(s).')
+        
+        # Add trust signal info
+        if trust_signals.get('is_trusted_sender'):
+            parts.append('✓ Sender is from a trusted domain.')
+        
+        if trust_signals.get('has_unsubscribe'):
+            parts.append('✓ Email has legitimate footer/unsubscribe link.')
+        
+        if trust_signals.get('sender_link_match'):
+            parts.append('✓ Links match sender domain (legitimate).')
+        
+        # Recommendation
+        if risk_level == 'High':
+            parts.append('⚠ Do not click links or provide information. Report as spam.')
+        elif risk_level == 'Medium':
+            parts.append('⚠ Be cautious. Verify sender independently before acting.')
+        else:
+            parts.append('This appears to be a legitimate email.')
+        
+        return ' '.join(parts)
+
     def analyze(self, sender: str, subject: str, body: str, links: List[str] = None) -> DetectionResult:
         """
-        Perform comprehensive phishing analysis.
+        Perform comprehensive phishing analysis with trust-based scoring.
+
+        Strategy:
+        1. Check rule matches on text
+        2. Analyze URLs for suspicious characteristics
+        3. Apply trust signals (reduce risk if legitimate)
+        4. Apply risk amplification (increase risk if dangerous combo)
+        5. Cap final score and determine risk level
+        6. Generate natural language explanation
 
         Args:
             sender: Email sender address
             subject: Email subject line
             body: Email body content
+            links: List of URLs extracted from email
 
         Returns:
             DetectionResult with risk assessment
         """
-        # Combine text for analysis; mask PII in returned explanations if needed (we avoid storing raw text)
+        # Combine text for analysis
         full_text = f"{subject or ''} {body or ''}"
 
         # Extract URLs from subject+body text AND from provided links array
@@ -259,40 +466,179 @@ class PhishingDetector:
         # Combine and deduplicate URLs
         all_urls = list(dict.fromkeys(urls_from_text + urls_from_links))
 
+        # =====================================================================
+        # THREAT SCORING
+        # =====================================================================
+        
         # Rule-based matches and score
         matched_rules, rule_score = self.check_rules(full_text)
 
         # URL analysis and URL-based score
         suspicious_urls, url_score = self.analyze_urls(all_urls, sender or "")
 
-        # Compose base confidence from rules + urls
-        confidence = min(rule_score + url_score, 1.0)
+        # Base threat score (before trust adjustments)
+        threat_score = min(rule_score + url_score, 1.0)
 
-        # Decide risk level by thresholds
-        if confidence >= 0.70:
+        # =====================================================================
+        # TRUST SIGNALS (reduce risk)
+        # =====================================================================
+        
+        trust_signals = {
+            'is_trusted_sender': False,
+            'has_unsubscribe': False,
+            'sender_link_match': False
+        }
+
+        trust_reduction = 0.0
+
+        # Signal 1: Sender from trusted domain
+        sender_domain = sender.split('@')[1] if sender and '@' in sender else ''
+        if sender_domain and self._is_trusted_domain(sender_domain):
+            trust_signals['is_trusted_sender'] = True
+            trust_reduction += 0.25  # Significant reduction for known-good domains
+
+        # Signal 2: Email has unsubscribe/footer (legitimate business email)
+        if self._check_unsubscribe_or_footer(full_text, all_urls):
+            trust_signals['has_unsubscribe'] = True
+            trust_reduction += 0.10
+
+        # Signal 3: Sender domain matches link domain (not trying to spoof)
+        if self._sender_domain_matches_link_domain(sender, all_urls):
+            trust_signals['sender_link_match'] = True
+            trust_reduction += 0.15
+
+        # Apply trust reduction to threat score
+        adjusted_score = max(0.0, threat_score - trust_reduction)
+
+        # =====================================================================
+        # RISK AMPLIFICATION (increase risk when dangerous combos coexist)
+        # =====================================================================
+        
+        amplification = self._should_amplify_risk(matched_rules, sender, all_urls)
+        final_score = min(adjusted_score + amplification, 1.0)
+
+        # =====================================================================
+        # RISK LEVEL DETERMINATION
+        # =====================================================================
+        
+        if final_score >= 0.70:
             risk = "High"
-        elif confidence >= 0.40:
+        elif final_score >= 0.40:
             risk = "Medium"
         else:
             risk = "Low"
 
-        # Explanations
+        # =====================================================================
+        # EXPLANATIONS
+        # =====================================================================
+        
+        # Bullet-point explanations of matched rules
         explanations = self.get_explanations(matched_rules)
         if suspicious_urls:
             explanations.append(f"Email contains {len(suspicious_urls)} suspicious link(s).")
 
-        # Reasons: combine matched rules + url-based reason id (if any)
+        # Natural language summary
+        explanation = self._generate_explanation(
+            risk, final_score, matched_rules, suspicious_urls, sender, all_urls, trust_signals
+        )
+
+        # =====================================================================
+        # REASONS (machine-readable)
+        # =====================================================================
+        
         reasons = matched_rules[:]
         if suspicious_urls:
             reasons.append('suspicious_link')
+        if final_score >= 0.70:
+            reasons.append('high_risk_classification')
+        elif final_score >= 0.40:
+            reasons.append('medium_risk_classification')
 
         # Ensure uniqueness
         reasons = list(dict.fromkeys(reasons))
 
         return DetectionResult(
             risk_level=risk,
-            confidence_score=round(confidence, 2),
+            confidence_score=round(final_score, 2),
             reasons=reasons,
             explanations=explanations,
             suspicious_links=suspicious_urls,
+            explanation=explanation,
         )
+
+    def extract_signals(self, sender: str, subject: str, body: str, links: List[str] = None) -> Dict:
+        """
+        Build structured signals for AI decision layer.
+        
+        Args:
+            sender: Email sender address
+            subject: Email subject line
+            body: Email body content
+            links: List of URLs from email
+        
+        Returns:
+            Dict with structured signals for LLM classification
+        """
+        full_text = f"{subject or ''} {body or ''}"
+        all_urls = list(dict.fromkeys(
+            self.detect_urls(full_text) + (links if links else [])
+        ))
+        
+        # Extract domains
+        sender_domain = ''
+        try:
+            sender_domain = self._extract_base_domain(sender.split('@')[1]) if sender and '@' in sender else ''
+        except Exception:
+            pass
+        
+        link_domains = []
+        for url in all_urls:
+            try:
+                domain = self._extract_domain(url)
+                if domain:
+                    base_domain = self._extract_base_domain(domain)
+                    if base_domain and base_domain not in link_domains:
+                        link_domains.append(base_domain)
+            except Exception:
+                pass
+        
+        # Check for threat patterns
+        text_lower = full_text.lower()
+        
+        urgency_detected = bool(re.search(r'\b(urgent|act now|immediately|asap)\b', text_lower))
+        verification_request = bool(re.search(r'\b(verify|confirm).*(account|identity|login|password)\b', text_lower))
+        reward_language = bool(re.search(r'\b(congratulations|claim.*prize|you won|you have been selected)\b', text_lower))
+        suspension_threat = bool(re.search(r'\b(suspend|lock|restrict|will be closed)\b', text_lower))
+        
+        # Check trust signals
+        known_sender = sender_domain and self._is_trusted_domain(sender_domain)
+        sender_link_match = sender_domain and sender_domain in link_domains
+        domain_mismatch = bool(sender_domain and link_domains and sender_domain not in link_domains)
+        unsubscribe_present = self._check_unsubscribe_or_footer(full_text, all_urls)
+        
+        # Create email context (first 2-3 lines of body)
+        email_context = ''
+        if body:
+            lines = body.split('\n')
+            email_context = ' '.join(lines[:2]).strip()[:150]
+        elif subject:
+            email_context = subject[:150]
+        
+        return {
+            'sender_domain': sender_domain or 'unknown',
+            'link_domains': link_domains,
+            'urgency_detected': urgency_detected,
+            'verification_request': verification_request,
+            'reward_language': reward_language,
+            'suspension_threat': suspension_threat,
+            'domain_mismatch': domain_mismatch,
+            'unsubscribe_present': unsubscribe_present,
+            'known_sender': known_sender,
+            'sender_link_match': sender_link_match,
+            'email_context': email_context,
+            'threat_indicators': {
+                'urgency_pressure': 'urgency_pressure' in [r['id'] for r in self.rules],
+                'verify_account': 'verify_account' in [r['id'] for r in self.rules],
+                'account_suspension': 'account_suspension' in [r['id'] for r in self.rules],
+            }
+        }

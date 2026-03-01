@@ -9,6 +9,7 @@ import re
 from typing import Dict, Any, Tuple
 
 from detector import PhishingDetector, PIIMasker
+from llm_decision import ai_decision_with_fallback
 
 
 def create_app() -> Flask:
@@ -23,45 +24,33 @@ def create_app() -> Flask:
     # INPUT VALIDATION & SANITIZATION
     # ============================================================================
     
-    def validate_email_input(data: Dict) -> Tuple[bool, str, Dict]:
+    def validate_email_input(data: Dict) -> Tuple[bool, Dict]:
         """
         Validate and sanitize email input.
-        Returns: (is_valid, error_message, sanitized_data)
+        Accepts partial payloads - returns what's available.
+        Returns: (has_data, sanitized_data)
         """
-        required_fields = ['sender', 'subject', 'body']
+        sender = data.get('sender', '').strip() if data.get('sender') else ''
+        subject = data.get('subject', '').strip() if data.get('subject') else ''
+        body = data.get('body', '').strip() if data.get('body') else ''
         
-        # Check required fields
-        for field in required_fields:
-            if field not in data:
-                return False, f"Missing required field: {field}", {}
-        
-        sender = data.get('sender', '').strip()
-        subject = data.get('subject', '').strip()
-        body = data.get('body', '').strip()
-        
-        # Validate non-empty
-        if not sender or not subject or not body:
-            return False, "All fields (sender, subject, body) must be non-empty", {}
-        
-        # Validate field lengths (prevent DOS)
+        # Enforce field length limits to prevent DoS
         if len(sender) > 255:
-            return False, "Sender field too long (max 255 chars)", {}
+            sender = sender[:255]
         if len(subject) > 1000:
-            return False, "Subject field too long (max 1000 chars)", {}
+            subject = subject[:1000]
         if len(body) > 50000:
-            return False, "Body field too long (max 50000 chars)", {}
-        
-        # Basic email format validation
-        email_regex = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-        if not re.match(email_regex, sender):
-            return False, "Invalid sender email format", {}
+            body = body[:50000]
         
         # Extract links array if provided (optional field)
         links = data.get('links', [])
         if not isinstance(links, list):
             links = []
         
-        return True, "", {
+        # Consider data present if any field is non-empty
+        has_data = bool(sender or subject or body)
+        
+        return has_data, {
             'sender': sender,
             'subject': subject,
             'body': body,
@@ -77,67 +66,109 @@ def create_app() -> Flask:
         """
         Scan an email for phishing indicators.
         
-        Request JSON:
+        Request JSON (all fields optional):
         {
             "sender": "user@example.com",
             "subject": "Verify your account",
-            "body": "Click here to verify..."
+            "body": "Click here to verify...",
+            "links": ["http://example.com"]
         }
         
         Response JSON:
         {
-            "risk_level": "High",
-            "confidence_score": 0.85,
+            "risk_level": "High|Medium|Low|Unknown",
+            "confidence_score": 0.0-1.0,
             "reasons": ["verify_account", "click_link_urgency"],
             "explanations": [
                 "Email requests verification of account credentials.",
                 "Email urges clicking a link or button."
             ],
             "suspicious_links": ["http://bit.ly/x"],
-            "timestamp": "2026-02-25T10:30:00Z"
+            "status": "success"
         }
+        
+        NOTE: Never returns 400/error status. Accepts partial payloads.
         """
         try:
             data = request.get_json()
             
             if not data:
+                # Empty payload - return default response
                 return jsonify({
-                    'error': 'Request body must be valid JSON',
-                    'status': 'error',
-                }), 400
+                    'risk_level': 'Unknown',
+                    'confidence_score': 0.0,
+                    'reasons': [],
+                    'explanations': ['Insufficient data to analyze'],
+                    'suspicious_links': [],
+                    'explanation': 'No email data provided for analysis.',
+                    'status': 'success',
+                }), 200
             
-            # Validate and sanitize input
-            is_valid, error_msg, sanitized = validate_email_input(data)
-            if not is_valid:
+            # Validate and sanitize input (accepts partial payloads)
+            has_data, sanitized = validate_email_input(data)
+            
+            if not has_data:
+                # No email fields provided - return default response
                 return jsonify({
-                    'error': error_msg,
-                    'status': 'error',
-                }), 400
+                    'risk_level': 'Unknown',
+                    'confidence_score': 0.0,
+                    'reasons': [],
+                    'explanations': ['Insufficient data to analyze'],
+                    'suspicious_links': [],
+                    'explanation': 'No email data provided for analysis.',
+                    'status': 'success',
+                }), 200
             
-            # Perform detection
-            result = detector.analyze(
+            # Perform detection on whatever data we have (rule-based)
+            rule_result = detector.analyze(
                 sender=sanitized['sender'],
                 subject=sanitized['subject'],
                 body=sanitized['body'],
                 links=sanitized.get('links', []),
             )
             
-            # Return structured response (no raw email content logged)
+            # Extract signals for AI decision
+            signals = detector.extract_signals(
+                sender=sanitized['sender'],
+                subject=sanitized['subject'],
+                body=sanitized['body'],
+                links=sanitized.get('links', []),
+            )
+            
+            # Try AI decision (falls back to rule-based if LLM unavailable)
+            ai_decision = ai_decision_with_fallback(
+                signals,
+                {
+                    'risk_level': rule_result.risk_level,
+                    'confidence_score': rule_result.confidence_score,
+                }
+            )
+            
+            # Return AI classification + rule-based details
             return jsonify({
-                'risk_level': result.risk_level,
-                'confidence_score': result.confidence_score,
-                'reasons': result.reasons,
-                'explanations': result.explanations,
-                'suspicious_links': result.suspicious_links,
+                'risk_level': ai_decision['risk_level'],
+                'confidence_score': ai_decision['confidence_score'],
+                'reasons': rule_result.reasons,
+                'explanations': rule_result.explanations,
+                'suspicious_links': rule_result.suspicious_links,
+                'explanation': ai_decision['explanation'],
+                'classification': ai_decision['classification'],
+                'ai_used': ai_decision.get('ai_used', False),
                 'status': 'success',
             }), 200
         
         except Exception as e:
             # Don't leak internal error details
+            # Return graceful default response instead of 500 error
             return jsonify({
-                'error': 'An unexpected error occurred during analysis',
-                'status': 'error',
-            }), 500
+                'risk_level': 'Unknown',
+                'confidence_score': 0.0,
+                'reasons': [],
+                'explanations': ['Unable to analyze at this time'],
+                'suspicious_links': [],
+                'explanation': 'An error occurred during analysis.',
+                'status': 'success',
+            }), 200
     
     @app.route('/health', methods=['GET'])
     def health_check():
